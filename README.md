@@ -32,7 +32,7 @@ if you want to host the library yourself:
 1. upload `shadowui.lua` to github/pastebin (raw).
 2. load it in your script:
    ```lua
-   local library = loadstring(game:HttpGet("your_raw_link_here"))()
+   local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/ljashub/ShadowUI/refs/heads/main/ShadowUI.lua"))()
    local ui = library:init("shadowui") -- initialize with your custom name
    ui:create_watermark() -- enable the permanent watermark
    
