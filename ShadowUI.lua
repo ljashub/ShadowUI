@@ -20,7 +20,7 @@ library.theme = {
     rainbow = false
 }
 
-local elements = {glows = {}, toggles = {}, fills = {}, panels = {}, lists = {}}
+local elements = {glows = {}, toggles = {}, fills = {}, panels = {}, lists = {}, all_modules = {}}
 
 local function create(class, props)
     local inst = Instance.new(class)
@@ -30,6 +30,43 @@ end
 
 local function format_text(str) 
     return library.theme.lowercase and string.lower(tostring(str)) or tostring(str) 
+end
+
+function library:update_hud()
+    if not self.hud_container then return end
+    for _, child in pairs(self.hud_container:GetChildren()) do
+        if child:IsA("TextLabel") then child:Destroy() end
+    end
+
+    local active_mods = {}
+    for _, mod in pairs(elements.all_modules) do
+        if mod.active then table.insert(active_mods, mod) end
+    end
+
+    table.sort(active_mods, function(a, b) return #a.name > #b.name end)
+
+    for i, mod in pairs(active_mods) do
+        local label = create("TextLabel", {
+            Parent = self.hud_container,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 0, 0, 22),
+            Font = self.theme.font,
+            Text = format_text(mod.name) .. "  ",
+            TextColor3 = self.theme.accent,
+            TextSize = 17,
+            TextXAlignment = "Right",
+            AutomaticSize = "X",
+            LayoutOrder = i
+        })
+        local bar = create("Frame", {
+            Parent = label,
+            BackgroundColor3 = self.theme.accent,
+            BorderSizePixel = 0,
+            Position = UDim2.new(1, -2, 0, 0),
+            Size = UDim2.new(0, 2, 1, 0)
+        })
+        table.insert(elements.fills, bar)
+    end
 end
 
 function library:update_theme()
@@ -73,6 +110,13 @@ function library:init(name)
     self.sg = create("ScreenGui", {Name = "shadow_ui", Parent = core, ResetOnSpawn = false})
     self.container = create("Frame", {Name = "container", Parent = self.sg, Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1, Visible = true})
     self.blur = create("BlurEffect", {Parent = game:GetService("Lighting"), Size = self.theme.blur_size, Name = "shadow_blur"})
+    
+    self.hud_container = create("Frame", {
+        Name = "hud_container", Parent = self.sg, BackgroundTransparency = 1, 
+        Position = UDim2.new(1, -15, 0, 15), Size = UDim2.new(0, 200, 1, -30), AnchorPoint = Vector2.new(1, 0)
+    })
+    create("UIListLayout", {Parent = self.hud_container, HorizontalAlignment = "Right", VerticalAlignment = "Top", Padding = UDim.new(0, 2), SortOrder = "LayoutOrder"})
+    
     local visible = true
 
     uis.InputBegan:Connect(function(i, g)
@@ -80,6 +124,28 @@ function library:init(name)
             visible = not visible
             self.container.Visible = visible
             ts:Create(self.blur, TweenInfo.new(0.4), {Size = visible and self.theme.blur_size or 0}):Play()
+        end
+        
+        if not g then
+            for _, mod in pairs(elements.all_modules) do
+                if mod.key and i.KeyCode == mod.key then
+                    if mod.mode == "toggle" then
+                        mod:set_active(not mod.active)
+                    elseif mod.mode == "hold" then
+                        mod:set_active(true)
+                    end
+                end
+            end
+        end
+    end)
+
+    uis.InputEnded:Connect(function(i, g)
+        if not g then
+            for _, mod in pairs(elements.all_modules) do
+                if mod.key and i.KeyCode == mod.key and mod.mode == "hold" then
+                    mod:set_active(false)
+                end
+            end
         end
     end)
 
@@ -115,28 +181,61 @@ function library:init(name)
         create("UIListLayout", {Parent = list, Padding = UDim.new(0, 2)})
         makedrag(panel)
         function cat:add_module(m_name, cb)
-            local mod = {active = false, open = false}
+            local mod = {active = false, open = false, name = m_name, key = nil, mode = "toggle"}
+            table.insert(elements.all_modules, mod)
+            
             local btn = create("TextButton", {Parent = list, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 38), Font = self.theme.font, Text = "   " .. format_text(m_name), TextColor3 = self.theme.module_off, TextSize = 16, TextXAlignment = "Left", AutoButtonColor = false})
             elements.toggles[mod] = btn
             local settings = create("Frame", {Parent = list, BackgroundColor3 = self.theme.setting_bg, BackgroundTransparency = 0.4, Size = UDim2.new(1, 0, 0, 0), BorderSizePixel = 0, ClipsDescendants = true, Visible = false, AutomaticSize = Enum.AutomaticSize.Y})
             create("UIListLayout", {Parent = settings})
-            btn.MouseButton1Click:Connect(function()
-                mod.active = not mod.active
-                ts:Create(btn, TweenInfo.new(0.35), {TextColor3 = mod.active and lib.theme.accent or self.theme.module_off}):Play()
+            
+            function mod:set_active(state)
+                if mod.mode == "always" then state = true end
+                if mod.active == state then return end
+                mod.active = state
+                ts:Create(btn, TweenInfo.new(0.35), {TextColor3 = mod.active and library.theme.accent or library.theme.module_off}):Play()
                 cb(mod.active)
+                library:update_hud()
+            end
+
+            btn.MouseButton1Click:Connect(function()
+                mod:set_active(not mod.active)
             end)
             btn.MouseButton2Click:Connect(function()
                 mod.open = not mod.open
                 settings.Visible = mod.open
                 ts:Create(settings, TweenInfo.new(0.4), {BackgroundTransparency = mod.open and 0.4 or 1}):Play()
             end)
+
+            -- Built-in Settings for Keybind and Mode
+            local kb_btn = create("TextButton", {Parent = settings, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Font = self.theme.font, Text = "     bind: " .. (mod.key and mod.key.Name or "none"), TextColor3 = self.theme.subtext, TextSize = 13, TextXAlignment = "Left"})
+            kb_btn.MouseButton1Click:Connect(function()
+                kb_btn.Text = "     bind: ..."
+                local l; l = uis.InputBegan:Connect(function(i)
+                    if i.UserInputType == Enum.UserInputType.Keyboard then
+                        mod.key = i.KeyCode == Enum.KeyCode.Escape and nil or i.KeyCode
+                        kb_btn.Text = "     bind: " .. (mod.key and mod.key.Name or "none")
+                        l:Disconnect()
+                    end
+                end)
+            end)
+
+            local mode_btn = create("TextButton", {Parent = settings, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Font = self.theme.font, Text = "     mode: " .. mod.mode, TextColor3 = self.theme.subtext, TextSize = 13, TextXAlignment = "Left"})
+            mode_btn.MouseButton1Click:Connect(function()
+                if mod.mode == "toggle" then mod.mode = "hold"
+                elseif mod.mode == "hold" then mod.mode = "always"
+                else mod.mode = "toggle" end
+                mode_btn.Text = "     mode: " .. mod.mode
+                if mod.mode == "always" then mod:set_active(true) end
+            end)
+
             function mod:add_toggle(s_name, def, scb)
                 local s = def
-                local t_btn = create("TextButton", {Parent = settings, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Font = self.theme.font, Text = "     " .. format_text(s_name) .. ": " .. (s and "on" or "off"), TextColor3 = s and lib.theme.accent or self.theme.subtext, TextSize = 13, TextXAlignment = "Left"})
+                local t_btn = create("TextButton", {Parent = settings, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Font = self.theme.font, Text = "     " .. format_text(s_name) .. ": " .. (s and "on" or "off"), TextColor3 = s and library.theme.accent or self.theme.subtext, TextSize = 13, TextXAlignment = "Left"})
                 t_btn.MouseButton1Click:Connect(function()
                     s = not s
                     t_btn.Text = "     " .. format_text(s_name) .. ": " .. (s and "on" or "off")
-                    ts:Create(t_btn, TweenInfo.new(0.2), {TextColor3 = s and lib.theme.accent or self.theme.subtext}):Play()
+                    ts:Create(t_btn, TweenInfo.new(0.2), {TextColor3 = s and library.theme.accent or self.theme.subtext}):Play()
                     scb(s)
                 end)
             end
@@ -144,7 +243,7 @@ function library:init(name)
                 local f = create("Frame", {Parent = settings, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 44)})
                 local l = create("TextLabel", {Parent = f, BackgroundTransparency = 1, Position = UDim2.new(0, 22, 0, 6), Size = UDim2.new(1, -30, 0, 16), Font = self.theme.font, Text = format_text(s_name) .. ": " .. def, TextColor3 = self.theme.subtext, TextSize = 12, TextXAlignment = "Left"})
                 local b = create("Frame", {Parent = f, BackgroundColor3 = Color3.fromRGB(35, 35, 40), Position = UDim2.new(0, 22, 0, 28), Size = UDim2.new(1, -44, 0, 5), BorderSizePixel = 0})
-                local fill = create("Frame", {Parent = b, BackgroundColor3 = lib.theme.accent, Size = UDim2.new((def-min)/(max-min), 0, 1, 0), BorderSizePixel = 0})
+                local fill = create("Frame", {Parent = b, BackgroundColor3 = library.theme.accent, Size = UDim2.new((def-min)/(max-min), 0, 1, 0), BorderSizePixel = 0})
                 table.insert(elements.fills, fill)
                 local c = create("TextButton", {Parent = b, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, 0), Text = ""})
                 local d = false
